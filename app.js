@@ -233,16 +233,27 @@ function nextAlert(alert){
 
 function allEvents(){
   const events = [];
+  // Inserisce TUTTI i cambi fusto futuri, non solo il primo.
+  // In questo modo i cambi fusto entrano nella stessa coda delle altre attività.
   state.machines.forEach(m=>{
     if(m.paused) return;
-    const bin = calculateBin(m);
-    if(bin) events.push(bin);
+    const schedule = buildBinSchedule(m, 50);
+    schedule.forEach(item=>{
+      events.push({
+        type: "bin",
+        title: `Cambio fusto — ${m.name || "Macchina"}`,
+        at: item.at,
+        target: item.target,
+        alertCounter: item.alertCounter
+      });
+    });
   });
   state.alerts.forEach(a=>{
     const ev = nextAlert(a);
     if(ev) events.push(ev);
   });
-  return events.sort((a,b)=>a.at-b.at);
+  return events.filter(e=>e && e.at instanceof Date && !isNaN(e.at.getTime()))
+    .sort((a,b)=>a.at-b.at);
 }
 
 function fillProducts(){
