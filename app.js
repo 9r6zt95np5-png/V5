@@ -99,6 +99,16 @@ state.products ||= [];
 state.alerts ||= [];
 state.feedback ||= [];
 state.dashboardMachine = Number.isInteger(state.dashboardMachine) ? state.dashboardMachine : 0;
+// Pulizia degli eventuali duplicati creati dalle versioni precedenti.
+// Per macchina può esserci una sola Uniformità attiva e una sola Uniformità per compresse attiva.
+const __seenSpecialAlerts = new Set();
+state.alerts = state.alerts.filter(a => {
+  if(a.name !== "Uniformità" && a.name !== "Uniformità per compresse") return true;
+  const k = `${num(a.machineIndex)}|${a.name}`;
+  if(__seenSpecialAlerts.has(k)) return false;
+  __seenSpecialAlerts.add(k);
+  return true;
+});
 localStorage.setItem(STORE, JSON.stringify(state));
 
 function save(){ localStorage.setItem(STORE, JSON.stringify(state)); }
@@ -187,8 +197,16 @@ function nextAlert(alert){
     const interval = 8;
     const nextThreshold = Math.floor(current / interval + 1) * interval;
     const missingHours = Math.max(0, nextThreshold - current);
-    const base = new Date(alert.updatedAt || Date.now());
-    const at = new Date(base.getTime() + missingHours * 3600000);
+
+    // L'orario dell'uniformità deve essere un EVENTO FISSO.
+    // Non deve essere ricalcolato usando Date.now() ad ogni refresh della Dashboard.
+    let at = alert.scheduledAt ? new Date(alert.scheduledAt) : null;
+    if(!at || isNaN(at.getTime())){
+      const base = new Date(alert.updatedAt || Date.now());
+      at = new Date(base.getTime() + missingHours * 3600000);
+      alert.scheduledAt = at.toISOString();
+      save();
+    }
 
     return {
       type:"uniformita",
@@ -210,8 +228,14 @@ function nextAlert(alert){
     if(rate <= 0 || targetCounter <= currentCounter) return null;
 
     const missingTablets = targetCounter - currentCounter;
-    const base = new Date(alert.updatedAt || Date.now());
-    const at = new Date(base.getTime() + (missingTablets / rate) * 3600000);
+    // Anche questo è un evento singolo: fissiamo l'orario alla prima programmazione.
+    let at = alert.scheduledAt ? new Date(alert.scheduledAt) : null;
+    if(!at || isNaN(at.getTime())){
+      const base = new Date(alert.updatedAt || Date.now());
+      at = new Date(base.getTime() + (missingTablets / rate) * 3600000);
+      alert.scheduledAt = at.toISOString();
+      save();
+    }
     const machineName = state.machines[alert.machineIndex]?.name || `Macchina ${Number(alert.machineIndex)+1}`;
 
     return {
@@ -733,13 +757,19 @@ $("#addAlertBtn").onclick = () => {
     const machineSeconds=parseMachineTime(raw);
     if(machineSeconds===null){alert("Inserisci il tempo macchina nel formato HHH:MM:SS, per esempio 125:30:00");return;}
     const machineHours=machineSeconds/3600;
+    const interval = 8;
+    const nextThreshold = Math.floor(machineHours / interval + 1) * interval;
+    const missingHours = Math.max(0, nextThreshold - machineHours);
+    const createdAt = new Date();
+    const scheduledAt = new Date(createdAt.getTime() + missingHours * 3600000);
 
     state.alerts.push({
       name:"Uniformità",
       machineIndex,
       mode:"machineHours",
       machineHours,
-      updatedAt:new Date().toISOString()
+      updatedAt:createdAt.toISOString(),
+      scheduledAt:scheduledAt.toISOString()
     });
 
     save();
@@ -778,13 +808,18 @@ $("#addAlertBtn").onclick = () => {
       return;
     }
 
+    const createdAt = new Date();
+    const missingTablets = targetCounter - counter;
+    const scheduledAt = new Date(createdAt.getTime() + (missingTablets / rate) * 3600000);
+
     state.alerts.push({
       name:"Uniformità per compresse",
       machineIndex,
       targetCounter,
       counter,
       rate,
-      updatedAt:new Date().toISOString()
+      updatedAt:createdAt.toISOString(),
+      scheduledAt:scheduledAt.toISOString()
     });
 
     $("#uniformityTabletsInput").value = "";
@@ -895,7 +930,7 @@ function setupMachineScroller(){
 setupMachineScroller();
 
 if("serviceWorker" in navigator){
-  window.addEventListener("load",()=>navigator.serviceWorker.register("./service-worker.js?v=206").catch(()=>{}));
+  window.addEventListener("load",()=>navigator.serviceWorker.register("./service-worker.js?v=208").catch(()=>{}));
 }
 
 
@@ -978,15 +1013,17 @@ function renderDashboardSummary(){
   // produrre più righe identiche nel riepilogo.
   const seenAlerts = new Set();
   state.alerts.filter(a => num(a.machineIndex) === i).forEach(a => {
-    const alertKey = JSON.stringify({
-      machineIndex: num(a.machineIndex),
-      name: a.name || "",
-      mode: a.mode || "",
-      intervalMinutes: num(a.intervalMinutes),
-      lastAt: a.lastAt || "",
-      updatedAt: a.updatedAt || "",
-      targetCounter: num(a.targetCounter)
-    });
+    const alertKey = (a.name === "Uniformità" || a.name === "Uniformità per compresse")
+      ? `${num(a.machineIndex)}|${a.name}`
+      : JSON.stringify({
+          machineIndex: num(a.machineIndex),
+          name: a.name || "",
+          mode: a.mode || "",
+          intervalMinutes: num(a.intervalMinutes),
+          lastAt: a.lastAt || "",
+          updatedAt: a.updatedAt || "",
+          targetCounter: num(a.targetCounter)
+        });
     if(seenAlerts.has(alertKey)) return;
     seenAlerts.add(alertKey);
 
