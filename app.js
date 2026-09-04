@@ -257,11 +257,45 @@ function allEvents(){
 }
 
 function fillProducts(){
-  $$(".productSelect").forEach(sel=>{
+  $$(".product-picker").forEach(picker=>{
+    const sel = $(".productSelect", picker);
+    const search = $(".productSearch", picker);
+    const options = $(".product-options", picker);
+    if(!sel || !search || !options) return;
+
     const current = sel.value;
-    sel.innerHTML = `<option value="">Seleziona prodotto</option>` +
-      state.products.map((p,i)=>`<option value="${i}">${escapeHtml(p.name)}</option>`).join("");
-    sel.value = current;
+    const selected = current !== "" ? state.products[num(current)] : null;
+    if(selected) search.value = selected.name;
+
+    const renderOptions = (query="") => {
+      const q = String(query || "").trim().toLocaleLowerCase("it-IT");
+      const matches = state.products.map((prod,i)=>({prod,i})).filter(({prod}) =>
+        !q || String(prod.name || "").toLocaleLowerCase("it-IT").includes(q)
+      );
+      options.innerHTML = matches.length
+        ? matches.map(({prod,i})=>`<button type="button" class="product-option" data-product-index="${i}"><strong>${escapeHtml(prod.name)}</strong><span>${num(prod.rate).toLocaleString("it-IT")} comp/h · fusto ${num(prod.bin).toLocaleString("it-IT")}</span></button>`).join("")
+        : `<div class="product-options-empty">Nessun prodotto trovato</div>`;
+      options.classList.remove("hidden");
+    };
+
+    search.oninput = () => renderOptions(search.value);
+    search.onfocus = () => renderOptions(search.value);
+    search.onkeydown = e => {
+      if(e.key === "Escape") options.classList.add("hidden");
+    };
+    options.onclick = e => {
+      const btn = e.target.closest("[data-product-index]");
+      if(!btn) return;
+      const index = num(btn.dataset.productIndex);
+      const prod = state.products[index];
+      if(!prod) return;
+      sel.value = String(index);
+      search.value = prod.name;
+      options.classList.add("hidden");
+      sel.dispatchEvent(new Event("change", {bubbles:true}));
+    };
+    if(current !== "") sel.value = current;
+    options.classList.add("hidden");
   });
 }
 
@@ -308,7 +342,13 @@ function hydrate(){
     $(".bin", card).value = m.bin ?? "";
     $(".margin", card).value = m.margin ?? 0;
     const productSelect = $(".productSelect", card);
-    if(productSelect && m.productIndex !== null && m.productIndex !== undefined) productSelect.value = String(m.productIndex);
+    const productSearch = $(".productSearch", card);
+    if(productSelect && m.productIndex !== null && m.productIndex !== undefined){
+      productSelect.value = String(m.productIndex);
+      if(productSearch) productSearch.value = state.products[m.productIndex]?.name || m.productName || "";
+    } else if(productSearch) {
+      productSearch.value = m.productName || "";
+    }
     $(".pauseMachine", card).textContent = m.paused ? "Riprendi" : "Macchina ferma";
   });
   refreshMachineNameSelects();
@@ -334,47 +374,17 @@ function readFields(card){
 
 
 function chooseStartMode(){
-  return new Promise(resolve => {
-    const modal = $("#startModal");
-    modal.classList.remove("hidden");
-
-    const cleanup = (value) => {
-      modal.classList.add("hidden");
-      $("#startNowChoice").onclick = null;
-      $("#startManualChoice").onclick = null;
-      $("#startCancelChoice").onclick = null;
-      resolve(value);
-    };
-
-    $("#startNowChoice").onclick = () => cleanup("now");
-    $("#startManualChoice").onclick = () => cleanup("manual");
-    $("#startCancelChoice").onclick = () => cleanup(null);
-  });
+  return Promise.resolve("now");
 }
 
 async function startMachine(card){
-  const choice = await chooseStartMode();
-  if(choice === null) return;
-
-  let start;
-  if(choice === "now"){
-    start = new Date();
-  } else if(choice === "manual"){
-    const value = prompt("Inserisci orario di partenza manuale (HH:MM)", "");
-    start = manualTimeToDate(value);
-    if(!start){
-      alert("Formato non valido. Esempio corretto: 22:00");
-      return;
-    }
-  }
-
+  const start = new Date();
   const data = readFields(card);
   if(data.rate <= 0 || data.bin <= 0){ alert("Inserisci produzione/ora e capacità fusto."); return; }
 
   const i = num(card.dataset.machine);
   state.machines[i] = {...(state.machines[i]||{}), ...data, lastUpdateAt:start.toISOString(), paused:false};
   save();
-  alert(`Macchina avviata con ora di partenza: ${fmtTime(start)}`);
   hydrate();
   render();
 }
@@ -686,6 +696,13 @@ $$(".productSelect").forEach(sel=>sel.onchange=e=>{
   renderDashboardSummary();
 });
 
+// Ricerca prodotti: chiudi i risultati cliccando fuori dal selettore.
+document.addEventListener("click", e=>{
+  $$(".product-picker").forEach(picker=>{
+    if(!picker.contains(e.target)) $(".product-options", picker)?.classList.add("hidden");
+  });
+});
+
 $("#saveProductBtn").onclick = () => {
   const p = {
     name: $("#productName").value.trim(),
@@ -976,6 +993,14 @@ function renderDashboardSummary(){
     }
   });
 
+  // Evita che lo stesso avviso venga visualizzato più volte durante i refresh ogni secondo.
+  const uniqueSchedule = new Map();
+  scheduleEvents.forEach(ev => {
+    const key = `${ev.type || "extra"}|${ev.title}|${ev.at.getTime()}`;
+    if(!uniqueSchedule.has(key)) uniqueSchedule.set(key, ev);
+  });
+  scheduleEvents.length = 0;
+  scheduleEvents.push(...uniqueSchedule.values());
   scheduleEvents.sort((a,b)=>a.at-b.at);
   if(scheduleBox){
     if(!state.shiftEnd){
@@ -1017,6 +1042,24 @@ hydrate();
 render();
 setView(state.currentView || "dashboard");
 renderDashboardSummary();
+
+// All'apertura dell'app chiedi il turno e imposta automaticamente la fine turno.
+function openShiftOnStartup(){
+  const modal = $("#shiftStartupModal");
+  if(!modal) return;
+  modal.classList.remove("hidden");
+  $$("[data-startup-shift]").forEach(btn=>{
+    btn.onclick = () => {
+      state.shiftEnd = nextShiftDate(btn.dataset.startupShift);
+      save();
+      modal.classList.add("hidden");
+      hydrate();
+      render();
+      renderDashboardSummary();
+    };
+  });
+}
+openShiftOnStartup();
 setInterval(()=>{ render(); renderAlerts(true); },1000);
 
 

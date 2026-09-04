@@ -388,6 +388,18 @@
 </div>
 
 <div class="sidebar-scrim" id="sidebarScrim"></div>
+<div id="shiftStartupModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-icon"><svg><use href="#i-shift"/></svg></div>
+    <h2>In che turno lavori?</h2>
+    <p>Seleziona il turno per impostare automaticamente l'orario di fine turno.</p>
+    <button class="btn primary" data-startup-shift="14:00">Mattina · fine 14:00</button>
+    <button class="btn primary" data-startup-shift="22:00">Pomeriggio · fine 22:00</button>
+    <button class="btn primary" data-startup-shift="06:00">Notte · fine 06:00</button>
+    <button class="btn primary" data-startup-shift="12:00">Straordinario · fine 12:00</button>
+  </div>
+</div>
+
 <div id="startModal" class="modal hidden">
   <div class="modal-box">
     <div class="modal-icon"><svg><use href="#i-play"/></svg></div>
@@ -398,6 +410,6 @@
     <button id="startCancelChoice" class="btn ghost">Annulla</button>
   </div>
 </div>
-<script src="app.js?v=201"></script>
+<script src="app.js?v=202"></script>
 </body>
 </html>
