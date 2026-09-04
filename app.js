@@ -1263,15 +1263,30 @@ document.addEventListener("click",(e)=>{
     try{
       if(typeof state !== "undefined" && Array.isArray(state.machines) && typeof calculateBin === "function"){
         state.machines.forEach(machine => {
-          if(machine && !machine.paused){
-            const calc = calculateBin(machine);
-            if(calc && calc.at){
-              events.push({
-                type:"bin",
-                title:`Cambio fusto — ${machine.name || "Macchina"}`,
-                at: calc.at
-              });
-            }
+          if(!machine || machine.paused) return;
+
+          // Inserisce i cambi fusto futuri tra le attività successive,
+          // non soltanto il primo cambio previsto per la macchina.
+          const rate = Number(machine.rate || 0);
+          const bin = Number(machine.bin || 0);
+          const counter = Number(machine.counter || 0);
+          const start = machine.lastUpdateAt ? new Date(machine.lastUpdateAt) : null;
+          if(rate <= 0 || bin <= 0 || !start || isNaN(start.getTime())) return;
+
+          let target = Math.floor(counter / bin + 1) * bin;
+          const shiftEnd = (typeof state.shiftEnd !== "undefined" && state.shiftEnd)
+            ? new Date(state.shiftEnd) : null;
+
+          for(let n=0; n<20; n++, target += bin){
+            const missing = Math.max(0, target - counter);
+            const at = new Date(start.getTime() + (missing / rate) * 3600000);
+            if(at < new Date()) continue;
+            if(shiftEnd && at > shiftEnd) break;
+            events.push({
+              type:"bin",
+              title:`Cambio fusto — ${machine.name || "Macchina"}`,
+              at
+            });
           }
         });
       }
