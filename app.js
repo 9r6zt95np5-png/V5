@@ -999,10 +999,10 @@ function renderDashboardSummary(){
       // Avvisi periodici: genera tutte le occorrenze fino a fine turno.
       if(a.intervalMinutes){
         ev = {...ev, at:new Date(ev.at.getTime() + Number(a.intervalMinutes)*60000)};
-      } else if(a.name === "Uniformità" && a.mode === "machineHours") {
-        const rate = num(machine.rate);
-        ev = rate > 0 ? {...ev, at:new Date(ev.at.getTime() + (8/rate)*3600000)} : null;
       } else {
+        // Uniformità e Uniformità per compresse sono eventi singoli:
+        // devono comparire una sola volta all'orario di scadenza.
+        // Il controllo successivo verrà programmato quando l'utente lo inserirà di nuovo.
         ev = null;
       }
     }
