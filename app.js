@@ -246,43 +246,12 @@ function allEvents(){
 }
 
 function fillProducts(){
-  $$(".machine").forEach(card=>{
-    const sel = $(".productSelect", card);
-    const search = $(".productSearch", card);
-    const options = $(".product-options", card);
-    if(!sel || !search || !options) return;
-
+  $$(".productSelect").forEach(sel=>{
     const current = sel.value;
+    sel.innerHTML = `<option value="">Seleziona prodotto</option>` +
+      state.products.map((p,i)=>`<option value="${i}">${escapeHtml(p.name)}</option>`).join("");
     sel.value = current;
-    const selectedIndex = current !== "" ? Number(current) : null;
-    search.value = selectedIndex !== null && state.products[selectedIndex]
-      ? state.products[selectedIndex].name
-      : "";
-
-    renderProductOptions(card, false);
   });
-}
-
-function renderProductOptions(card, open=true){
-  const search = $(".productSearch", card);
-  const options = $(".product-options", card);
-  const sel = $(".productSelect", card);
-  if(!search || !options || !sel) return;
-
-  const query = search.value.trim().toLocaleLowerCase("it-IT");
-  const matches = state.products
-    .map((p,i)=>({p,i}))
-    .filter(({p}) => !query || String(p.name || "").toLocaleLowerCase("it-IT").includes(query))
-    .slice(0, 40);
-
-  options.innerHTML = matches.length
-    ? matches.map(({p,i})=>`<button type="button" class="product-option" data-product-index="${i}">
-        <span>${escapeHtml(p.name)}</span>
-        <small>${num(p.rate).toLocaleString("it-IT")}/h · fusto ${num(p.bin).toLocaleString("it-IT")}</small>
-      </button>`).join("")
-    : `<div class="product-option-empty">Nessun prodotto trovato</div>`;
-
-  if(open) options.classList.remove("hidden");
 }
 
 function escapeHtml(str){
@@ -328,13 +297,7 @@ function hydrate(){
     $(".bin", card).value = m.bin ?? "";
     $(".margin", card).value = m.margin ?? 0;
     const productSelect = $(".productSelect", card);
-    const productSearch = $(".productSearch", card);
     if(productSelect && m.productIndex !== null && m.productIndex !== undefined) productSelect.value = String(m.productIndex);
-    if(productSearch){
-      productSearch.value = m.productIndex !== null && m.productIndex !== undefined && state.products[m.productIndex]
-        ? state.products[m.productIndex].name
-        : "";
-    }
     $(".pauseMachine", card).textContent = m.paused ? "Riprendi" : "Macchina ferma";
   });
   refreshMachineNameSelects();
@@ -648,7 +611,6 @@ $("#endShiftBtn").onclick = () => {
 
   // Azzera anche le selezioni prodotto rimaste visibili nelle schede.
   $$(".productSelect").forEach(select => select.value = "");
-  $$(".productSearch").forEach(input => input.value = "");
 
   save();
   hydrate();
@@ -688,9 +650,7 @@ $$(".resetMachine").forEach(btn=>{
     $(".margin",card).value = 0;
 
     const productSelect = $(".productSelect", card);
-    const productSearch = $(".productSearch", card);
     if(productSelect) productSelect.value = "";
-    if(productSearch) productSearch.value = "";
 
     const pauseBtn = $(".pauseMachine", card);
     if(pauseBtn) pauseBtn.textContent = "Macchina ferma";
@@ -702,55 +662,17 @@ $$(".resetMachine").forEach(btn=>{
   };
 });
 
-function applyProductToMachine(card, productIndex){
-  const p = state.products[Number(productIndex)];
-  const sel = $(".productSelect", card);
-  const search = $(".productSearch", card);
-  const options = $(".product-options", card);
-  if(!p || !sel) return;
-
-  sel.value = String(productIndex);
-  if(search) search.value = p.name;
-  if(options) options.classList.add("hidden");
-
+$$(".productSelect").forEach(sel=>sel.onchange=e=>{
+  const p = state.products[num(e.target.value)];
+  if(!p) return;
+  const card = e.target.closest(".machine");
   $(".rate",card).value = p.rate;
   $(".bin",card).value = p.bin;
   $(".margin",card).value = p.margin || 0;
-
   const i = num(card.dataset.machine);
   state.machines[i] = {...(state.machines[i]||{}), ...readFields(card)};
   save();
   renderDashboardSummary();
-  render();
-}
-
-$$(".productSearch").forEach(input=>{
-  input.addEventListener("focus", e => renderProductOptions(e.target.closest(".machine"), true));
-  input.addEventListener("input", e => {
-    const card = e.target.closest(".machine");
-    const sel = $(".productSelect", card);
-    // Se l'utente modifica la ricerca, la selezione precedente non resta attiva.
-    if(sel) sel.value = "";
-    renderProductOptions(card, true);
-  });
-  input.addEventListener("keydown", e => {
-    if(e.key === "Escape"){
-      $(".product-options", e.target.closest(".machine"))?.classList.add("hidden");
-      e.target.blur();
-    }
-  });
-});
-
-document.addEventListener("click", e=>{
-  const option = e.target.closest(".product-option[data-product-index]");
-  if(option){
-    const card = option.closest(".machine");
-    applyProductToMachine(card, option.dataset.productIndex);
-    return;
-  }
-  $$(".product-picker").forEach(picker=>{
-    if(!picker.contains(e.target)) $(".product-options", picker)?.classList.add("hidden");
-  });
 });
 
 $("#saveProductBtn").onclick = () => {
@@ -953,104 +875,6 @@ function selectedDashboardMachine(){
   return Math.max(0, Math.min(3, Number(state.dashboardMachine || 0)));
 }
 function fmtNumber(value){ return Number(value || 0).toLocaleString("it-IT"); }
-
-function getMachineShiftEvents(machineIndex){
-  const events = [];
-  const machine = state.machines[machineIndex] || {};
-  const shiftEnd = state.shiftEnd ? new Date(state.shiftEnd) : null;
-  const now = new Date();
-
-  // Tutti i cambi fusto previsti fino alla fine del turno.
-  if(!machine.paused){
-    buildBinSchedule(machine, 100).forEach(item=>{
-      if(item.at >= now && (!shiftEnd || item.at <= shiftEnd)){
-        events.push({
-          type:"bin",
-          title:"Cambio fusto",
-          at:item.at,
-          detail:`Cambio a ${item.target.toLocaleString("it-IT")} compresse`
-        });
-      }
-    });
-  }
-
-  // Tutti gli avvisi della macchina: per quelli periodici calcoliamo
-  // ogni occorrenza fino alla fine del turno.
-  state.alerts
-    .filter(a=>num(a.machineIndex) === machineIndex)
-    .forEach(alert=>{
-      let ev = nextAlert(alert);
-      if(!ev || !ev.at) return;
-
-      if(alert.intervalMinutes){
-        const intervalMs = Number(alert.intervalMinutes) * 60000;
-        let guard = 0;
-        while(ev.at >= now && (!shiftEnd || ev.at <= shiftEnd) && guard < 200){
-          events.push({
-            type:"alert",
-            title:alert.name,
-            at:new Date(ev.at),
-            detail: ev.type === "uniformita"
-              ? (ev.nextThreshold != null ? `Controllo a ${ev.nextThreshold} h macchina` : "")
-              : ""
-          });
-          ev = {...ev, at:new Date(ev.at.getTime() + intervalMs)};
-          guard++;
-        }
-      } else if(ev.at >= now && (!shiftEnd || ev.at <= shiftEnd)){
-        events.push({
-          type:"alert",
-          title:alert.name,
-          at:new Date(ev.at),
-          detail: ev.nextThreshold != null ? `Controllo a ${ev.nextThreshold} h macchina` : ""
-        });
-      }
-    });
-
-  return events.sort((a,b)=>a.at-b.at);
-}
-
-function renderDashboardMachineSchedule(){
-  const box = $("#dashMachineSchedule");
-  const endLabel = $("#dashShiftPlanEnd");
-  if(!box) return;
-
-  if(endLabel){
-    endLabel.textContent = state.shiftEnd
-      ? `Fine turno: ${fmtTime(new Date(state.shiftEnd))}`
-      : "Fine turno non impostata";
-  }
-
-  if(!state.shiftEnd){
-    box.innerHTML = `<div class="schedule-empty">Imposta la <b>fine turno</b> per vedere tutti i cambi fusto e gli avvisi programmati fino alla fine del turno.</div>`;
-    return;
-  }
-
-  const events = getMachineShiftEvents(selectedDashboardMachine());
-
-  if(!events.length){
-    box.innerHTML = `<div class="schedule-empty">Nessun cambio fusto o avviso programmato per questa macchina fino alle ${fmtTime(new Date(state.shiftEnd))}.</div>`;
-    return;
-  }
-
-  box.innerHTML = events.map(event=>{
-    const isBin = event.type === "bin";
-    const diff = event.at.getTime() - Date.now();
-    const cls = diff <= 10*60000 ? "soon" : "";
-    return `<div class="dashboard-schedule-item ${cls}">
-      <div class="dashboard-schedule-icon ${isBin ? "bin" : "alert"}">${isBin ? "F" : "!"}</div>
-      <div class="dashboard-schedule-info">
-        <strong>${escapeHtml(event.title)}</strong>
-        <small>${escapeHtml(event.detail || (isBin ? "Cambio fusto programmato" : "Controllo programmato"))}</small>
-      </div>
-      <div class="dashboard-schedule-time">
-        <strong>${fmtTime(event.at)}</strong>
-        <small>${fmtDuration(diff)}</small>
-      </div>
-    </div>`;
-  }).join("");
-}
-
 function renderDashboardSummary(){
   const i = selectedDashboardMachine();
   const machine = state.machines[i] || {};
@@ -1108,7 +932,6 @@ function renderDashboardSummary(){
   $("#shiftActiveMachines").textContent = `${active} / 4`;
   $("#shiftRemaining").textContent = state.shiftEnd ? fmtDuration(new Date(state.shiftEnd)-new Date()) : "--:--:--";
   $("#priorityDescription").textContent = allEvents().length ? "Attività prioritaria calcolata automaticamente." : "Imposta macchine, prodotti e controlli per iniziare.";
-  renderDashboardMachineSchedule();
 }
 
 $$(".dashboard-machine-tab").forEach(btn=>btn.onclick=()=>{
