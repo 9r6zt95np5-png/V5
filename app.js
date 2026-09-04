@@ -923,6 +923,64 @@ function renderDashboardSummary(){
     $("span",btn).textContent = m.name || `Macchina ${index+1}`;
   });
 
+  // Programma completo della macchina selezionata fino a fine turno.
+  const scheduleBox = $("#dashMachineSchedule");
+  const shiftEnd = state.shiftEnd ? new Date(state.shiftEnd) : null;
+  const scheduleEvents = [];
+  const now = new Date();
+
+  if (machine.lastUpdateAt && !machine.paused && num(machine.rate) > 0 && num(machine.bin) > 0) {
+    const binCalc = calculateBin(machine);
+    if (binCalc) {
+      const rate = num(machine.rate);
+      const bin = num(machine.bin);
+      // Il cambio fusto avviene al raggiungimento della capacità reale,
+      // mentre il margine resta il preavviso mostrato altrove.
+      let target = binCalc.nextMultiple;
+      for(let n=0; n<100; n++, target += bin){
+        const missing = Math.max(0, target - num(machine.counter));
+        const at = new Date(binCalc.baseTime.getTime() + missing / rate * 3600000);
+        if(shiftEnd && at > shiftEnd) break;
+        if(at >= now) scheduleEvents.push({type:"bin", title:"Cambio fusto", at});
+      }
+    }
+  }
+
+  state.alerts.filter(a => num(a.machineIndex) === i).forEach(a => {
+    let ev = nextAlert(a);
+    if(!ev || !ev.at) return;
+    let count = 0;
+    while(ev && ev.at >= now && (!shiftEnd || ev.at <= shiftEnd) && count < 100){
+      scheduleEvents.push({type:ev.type || "extra", title:ev.title, at:new Date(ev.at)});
+      count++;
+      // Avvisi periodici: genera tutte le occorrenze fino a fine turno.
+      if(a.intervalMinutes){
+        ev = {...ev, at:new Date(ev.at.getTime() + Number(a.intervalMinutes)*60000)};
+      } else if(a.name === "Uniformità" && a.mode === "machineHours") {
+        const rate = num(machine.rate);
+        ev = rate > 0 ? {...ev, at:new Date(ev.at.getTime() + (8/rate)*3600000)} : null;
+      } else {
+        ev = null;
+      }
+    }
+  });
+
+  scheduleEvents.sort((a,b)=>a.at-b.at);
+  if(scheduleBox){
+    if(!state.shiftEnd){
+      scheduleBox.innerHTML = '<div class="schedule-empty">Imposta la fine turno per vedere il programma completo.</div>';
+    } else if(!scheduleEvents.length){
+      scheduleBox.innerHTML = '<div class="schedule-empty">Nessun cambio fusto o avviso previsto fino a fine turno.</div>';
+    } else {
+      scheduleBox.innerHTML = scheduleEvents.map(ev => `
+        <div class="dashboard-schedule-item ${escapeHtml(ev.type)}">
+          <span class="schedule-time">${fmtTime(ev.at)}</span>
+          <span class="schedule-title">${escapeHtml(ev.title)}</span>
+        </div>`).join("");
+    }
+  }
+  $("#dashShiftPlanEnd").textContent = state.shiftEnd ? `Fine turno: ${fmtTime(new Date(state.shiftEnd))}` : "Fine turno: —";
+
   $("#alertsBadge").textContent = state.alerts.length;
   $("#alertCount").textContent = state.alerts.length;
   $("#productCount").textContent = state.products.length;
