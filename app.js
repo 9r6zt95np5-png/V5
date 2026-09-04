@@ -895,7 +895,7 @@ function setupMachineScroller(){
 setupMachineScroller();
 
 if("serviceWorker" in navigator){
-  window.addEventListener("load",()=>navigator.serviceWorker.register("./service-worker.js?v=201").catch(()=>{}));
+  window.addEventListener("load",()=>navigator.serviceWorker.register("./service-worker.js?v=206").catch(()=>{}));
 }
 
 
@@ -974,7 +974,22 @@ function renderDashboardSummary(){
     }
   }
 
+  // Un solo record per avviso: eventuali duplicati presenti nello stato non devono
+  // produrre più righe identiche nel riepilogo.
+  const seenAlerts = new Set();
   state.alerts.filter(a => num(a.machineIndex) === i).forEach(a => {
+    const alertKey = JSON.stringify({
+      machineIndex: num(a.machineIndex),
+      name: a.name || "",
+      mode: a.mode || "",
+      intervalMinutes: num(a.intervalMinutes),
+      lastAt: a.lastAt || "",
+      updatedAt: a.updatedAt || "",
+      targetCounter: num(a.targetCounter)
+    });
+    if(seenAlerts.has(alertKey)) return;
+    seenAlerts.add(alertKey);
+
     let ev = nextAlert(a);
     if(!ev || !ev.at) return;
     let count = 0;
@@ -996,7 +1011,7 @@ function renderDashboardSummary(){
   // Evita che lo stesso avviso venga visualizzato più volte durante i refresh ogni secondo.
   const uniqueSchedule = new Map();
   scheduleEvents.forEach(ev => {
-    const key = `${ev.type || "extra"}|${ev.title}|${ev.at.getTime()}`;
+    const key = `${ev.type || "extra"}|${ev.title}|${Math.floor(ev.at.getTime()/1000)}`;
     if(!uniqueSchedule.has(key)) uniqueSchedule.set(key, ev);
   });
   scheduleEvents.length = 0;
